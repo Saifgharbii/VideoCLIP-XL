@@ -1,15 +1,10 @@
-#!/usr/bin/env python
-import os
 import logging
 from collections import OrderedDict
 
 import torch
 from torch import nn
 from einops import rearrange
-from timm.layers.drop import DropPath
 from timm.models import register_model
-
-import torch.utils.checkpoint as checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +17,7 @@ class ResidualAttentionBlock(nn.Module):
     def __init__(self, d_model, n_head, drop_path=0., attn_mask=None, dropout=0.):
         super().__init__()
 
-        self.drop_path_attention = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.drop_path_MLP = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        # logger.info(f'Droppath: {drop_path}')
+
         self.attn = nn.MultiheadAttention(d_model, n_head, dropout=dropout)
         self.ln_1 = nn.LayerNorm(d_model)
         self.mlp = nn.Sequential(OrderedDict([
@@ -42,8 +35,8 @@ class ResidualAttentionBlock(nn.Module):
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward(self, x):
-        x = x + self.drop_path_attention(self.attention(self.ln_1(x)))
-        x = x + self.drop_path_MLP(self.mlp(self.ln_2(x)))
+        x = x + self.attention(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -58,16 +51,13 @@ class Transformer(nn.Module):
 
     def forward(self, x):
         for idx, blk in enumerate(self.resblocks):
-            if idx < self.checkpoint_num:
-                x = checkpoint.checkpoint(blk, x, use_reentrant=False)
-            else:
-                x = blk(x)
+            x = blk(x)
         return x
 
 
 class VisionTransformer(nn.Module):
     def __init__(
-        self, input_resolution, patch_size, width, layers, heads, output_dim=None, 
+        self,input_resolution=224, patch_size=14,width=1024, layers=24, heads=16, output_dim=768, 
         kernel_size=1, num_frames=8, drop_path=0.0, checkpoint_num=0, dropout=0.,
         temp_embed=True,
     ):
